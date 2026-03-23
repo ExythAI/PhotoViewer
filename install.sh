@@ -128,19 +128,16 @@ JWT_KEY=$(openssl rand -base64 48 2>/dev/null || head -c 64 /dev/urandom | base6
 
 cat > .env <<EOF
 # PhotoViewer Configuration — generated $(date -Iseconds)
+SMB_SHARE=${SMB_SHARE}
 SMB_USERNAME=${SMB_USERNAME}
 SMB_PASSWORD=${SMB_PASSWORD}
+APP_PORT=${APP_PORT}
 SCAN_INTERVAL=${SCAN_INTERVAL}
 JWT_KEY=${JWT_KEY}
 EOF
 
 chmod 600 .env
 echo -e "${GREEN}✓${NC} Configuration saved (.env)"
-
-# ---- Update docker-compose with custom share path and port ----
-sed -i "s|device: \"//winnfs/FamilyPhotos\"|device: \"${SMB_SHARE}\"|g" docker-compose.yml
-sed -i "s|\"8080:8080\"|\"${APP_PORT}:8080\"|g" docker-compose.yml
-echo -e "${GREEN}✓${NC} Docker Compose configured"
 
 # ---- Build & Start ----
 echo ""

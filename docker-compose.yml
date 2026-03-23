@@ -1,15 +1,7 @@
 # PhotoViewer - Docker Compose
 # 
-# Usage:
-#   1. Create a .env file with your SMB credentials:
-#      SMB_USERNAME=your_username
-#      SMB_PASSWORD=your_password
-#
-#   2. Run:
-#      docker-compose up -d --build
-#
-#   3. Access at http://localhost:8080
-#      Login: admin / admin
+# All configuration is read from the .env file.
+# See .env.example for available settings.
 
 services:
   photoviewer:
@@ -17,7 +9,7 @@ services:
     container_name: photoviewer
     restart: unless-stopped
     ports:
-      - "8080:8080"
+      - "${APP_PORT:-8080}:8080"
     volumes:
       - app_data:/data
       - photos_media:/media
@@ -38,11 +30,10 @@ volumes:
   app_data:
     driver: local
   
-  # CIFS mount for \\winnfs\FamilyPhotos
-  # Requires the host to have cifs-utils installed
+  # CIFS mount for network share
   photos_media:
     driver: local
     driver_opts:
       type: cifs
       o: "username=${SMB_USERNAME},password=${SMB_PASSWORD},vers=3.0,uid=1000,gid=1000,file_mode=0755,dir_mode=0755"
-      device: "//winnfs/FamilyPhotos"
+      device: "${SMB_SHARE:-//winnfs/FamilyPhotos}"
