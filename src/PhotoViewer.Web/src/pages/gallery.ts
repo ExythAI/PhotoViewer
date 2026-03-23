@@ -123,10 +123,9 @@ function renderHeader(user: { username: string; role: string } | null): string {
         <button class="nav-link" onclick="location.hash='#/downloads'">Downloads</button>
         <button class="nav-link" onclick="location.hash='#/duplicates'">Duplicates</button>
         ${user?.role === 'Admin' ? '<button class="nav-link" onclick="location.hash=\'#/users\'">Users</button>' : ''}
+        ${user?.role === 'Admin' ? '<button class="nav-link" onclick="location.hash=\'#/admin\'">Admin</button>' : ''}
       </nav>
       <div class="header-actions">
-        ${user?.role === 'Admin' ? '<button class="btn btn-sm" id="clear-db-btn" style="border-color:var(--danger)">🗑️ Clear DB</button>' : ''}
-        ${user?.role === 'Admin' ? '<button class="btn btn-sm" id="scan-btn">🔄 Scan Now</button>' : ''}
         <div class="user-badge">👤 ${user?.username || 'User'}</div>
         <button class="btn btn-sm" onclick="location.hash='#/settings'">⚙️</button>
         <button class="btn btn-sm" id="logout-btn">Logout</button>
@@ -172,20 +171,7 @@ function pollScanStatus(): void {
             ${s.currentFile ? `<span>📎 ${s.currentFile}</span>` : ''}
           </div>
         `;
-        // Toggle scan button to Stop
-        const scanBtn = document.getElementById('scan-btn');
-        if (scanBtn) {
-          scanBtn.textContent = '⏹ Stop Scan';
-          scanBtn.style.borderColor = 'var(--danger)';
-        }
       } else {
-        // Reset scan button to Scan Now
-        const scanBtn = document.getElementById('scan-btn');
-        if (scanBtn) {
-          scanBtn.textContent = '🔄 Scan Now';
-          scanBtn.style.borderColor = '';
-        }
-
         if (wasScanning) {
           // Scan just finished — refresh gallery data
           wasScanning = false;
@@ -275,20 +261,6 @@ function setupEventListeners(): void {
     loadMedia();
   });
 
-  document.getElementById('clear-db-btn')?.addEventListener('click', async () => {
-    if (!confirm('⚠️ This will DELETE all indexed media, thumbnails, and downloads.\n\nAre you sure?')) return;
-    if (!confirm('This cannot be undone. Type OK to confirm by clicking OK.')) return;
-
-    try {
-      const result = await api.clearDatabase();
-      showToast(result.message);
-      loadStats();
-      loadMedia();
-    } catch (err: any) {
-      showToast(err.message || 'Failed to clear database', 'error');
-    }
-  });
-
   document.getElementById('download-selected')?.addEventListener('click', downloadSelected);
   document.getElementById('clear-selection')?.addEventListener('click', () => {
     selectedIds.clear();
@@ -299,29 +271,6 @@ function setupEventListeners(): void {
   document.getElementById('logout-btn')?.addEventListener('click', () => {
     clearAuth();
     navigate('/login');
-  });
-
-  document.getElementById('scan-btn')?.addEventListener('click', async () => {
-    const btn = document.getElementById('scan-btn')!;
-    const isScanning = btn.textContent?.includes('Stop');
-
-    if (isScanning) {
-      try {
-        await api.stopScan();
-        showToast('Stop requested — scan will finish current file and stop');
-      } catch {
-        showToast('Failed to stop scan', 'error');
-      }
-    } else {
-      try {
-        await api.triggerScan();
-        showToast('Scan started!');
-        wasScanning = false;
-        pollScanStatus();
-      } catch {
-        showToast('Failed to start scan', 'error');
-      }
-    }
   });
 }
 

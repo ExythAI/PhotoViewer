@@ -92,11 +92,17 @@ export const api = {
 
   getStats: () => request<any>('/media/stats'),
 
-  triggerScan: () => request('/media/scan', { method: 'POST' }),
+  triggerScan: () => request('/admin/scan/start', { method: 'POST' }),
 
-  stopScan: () => request('/media/scan/stop', { method: 'POST' }),
-
-  clearDatabase: () => request<{ message: string }>('/media/clear', { method: 'POST' }),
+  // Admin APIs
+  adminStartScan: () => request('/admin/scan/start', { method: 'POST' }),
+  adminStopScan: () => request('/admin/scan/stop', { method: 'POST' }),
+  adminClearDatabase: () => request<{ message: string }>('/admin/clear', { method: 'POST' }),
+  adminGetSources: () => request<any[]>('/admin/sources'),
+  adminAddSource: (path: string, label?: string) =>
+    request('/admin/sources', { method: 'POST', body: JSON.stringify({ path, label }), headers: { 'Content-Type': 'application/json' } }),
+  adminDeleteSource: (id: number) => request(`/admin/sources/${id}`, { method: 'DELETE' }),
+  adminToggleSource: (id: number) => request(`/admin/sources/${id}/toggle`, { method: 'PUT' }),
 
   getScanStatus: () => request<{
     isScanning: boolean;

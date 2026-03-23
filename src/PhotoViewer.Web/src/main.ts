@@ -6,6 +6,7 @@ import { renderDownloads, trackDownloadId } from './pages/downloads';
 import { renderUsers } from './pages/users';
 import { renderDuplicates } from './pages/duplicates';
 import { renderSettings } from './pages/settings';
+import { renderAdmin } from './pages/admin';
 
 // Store original createDownload to intercept and track IDs
 import { api } from './api/client';
@@ -41,6 +42,7 @@ addRoute('/downloads', requireAuth(renderDownloads));
 addRoute('/users', requireAuth(renderUsers));
 addRoute('/duplicates', requireAuth(renderDuplicates));
 addRoute('/settings', requireAuth(renderSettings));
+addRoute('/admin', requireAuth(renderAdmin));
 
 // Initialize
 initRouter();

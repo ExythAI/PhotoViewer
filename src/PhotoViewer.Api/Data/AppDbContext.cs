@@ -10,6 +10,7 @@ public class AppDbContext : DbContext
     public DbSet<MediaFile> MediaFiles => Set<MediaFile>();
     public DbSet<User> Users => Set<User>();
     public DbSet<DownloadRequest> DownloadRequests => Set<DownloadRequest>();
+    public DbSet<MediaSource> MediaSources => Set<MediaSource>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

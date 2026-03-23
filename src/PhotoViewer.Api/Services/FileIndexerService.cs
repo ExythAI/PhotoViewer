@@ -83,9 +83,6 @@ public class FileIndexerService : BackgroundService
         _scanCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         var token = _scanCts.Token;
 
-        var mediaPath = _config["Storage:MediaPath"] ?? "/media";
-        _logger.LogInformation("Starting file scan of {Path}", mediaPath);
-
         Progress.IsScanning = true;
         Progress.LastScanStarted = DateTime.UtcNow;
         Progress.Status = "Starting scan...";
@@ -95,30 +92,65 @@ public class FileIndexerService : BackgroundService
         Progress.DeletedFiles = 0;
         Progress.SkippedFiles = 0;
 
-        if (!Directory.Exists(mediaPath))
-        {
-            _logger.LogWarning("Media path {Path} does not exist, skipping scan", mediaPath);
-            Progress.IsScanning = false;
-            Progress.Status = "Media path not found";
-            return;
-        }
-
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var thumbService = scope.ServiceProvider.GetRequiredService<ThumbnailService>();
 
-        // Count folders first
+        // Ensure default media source exists from config
+        var defaultPath = _config["Storage:MediaPath"] ?? "/media";
+        if (!await db.MediaSources.AnyAsync(token))
+        {
+            db.MediaSources.Add(new Models.MediaSource
+            {
+                Path = defaultPath,
+                Label = "Default",
+                IsActive = true
+            });
+            await db.SaveChangesAsync(token);
+        }
+
+        // Get all active sources
+        var sources = await db.MediaSources
+            .Where(s => s.IsActive)
+            .ToListAsync(token);
+
+        if (!sources.Any())
+        {
+            _logger.LogWarning("No active media sources configured");
+            Progress.IsScanning = false;
+            Progress.Status = "No active media sources";
+            return;
+        }
+
+        _logger.LogInformation("Scanning {Count} media source(s)", sources.Count);
+
+        // Discover files across all sources
         Progress.Status = "Discovering files...";
-        var allFolders = Directory.GetDirectories(mediaPath, "*", SearchOption.AllDirectories);
-        Progress.TotalFolders = allFolders.Length + 1; // +1 for root
+        var allFiles = new List<(string fullPath, string mediaRoot)>();
+        var totalFolders = 0;
+
+        foreach (var source in sources)
+        {
+            if (!Directory.Exists(source.Path))
+            {
+                _logger.LogWarning("Media source {Path} does not exist, skipping", source.Path);
+                continue;
+            }
+
+            var folders = Directory.GetDirectories(source.Path, "*", SearchOption.AllDirectories);
+            totalFolders += folders.Length + 1;
+
+            var files = Directory.EnumerateFiles(source.Path, "*", SearchOption.AllDirectories)
+                .Where(f => ThumbnailService.IsSupported(Path.GetExtension(f)))
+                .Select(f => (fullPath: f, mediaRoot: source.Path));
+
+            allFiles.AddRange(files);
+        }
+
+        Progress.TotalFolders = totalFolders;
         Progress.ScannedFolders = 0;
-
-        var allFiles = Directory.EnumerateFiles(mediaPath, "*", SearchOption.AllDirectories)
-            .Where(f => ThumbnailService.IsSupported(Path.GetExtension(f)))
-            .ToList();
-
         Progress.TotalFiles = allFiles.Count;
-        _logger.LogInformation("Found {Count} supported files in {Folders} folders", allFiles.Count, Progress.TotalFolders);
+        _logger.LogInformation("Found {Count} supported files in {Folders} folders", allFiles.Count, totalFolders);
 
         Progress.Status = "Indexing files...";
 
@@ -133,11 +165,11 @@ public class FileIndexerService : BackgroundService
         var skippedCount = 0;
 
         // ─── PHASE 1: Fast index (metadata only, no checksums, no thumbnails) ───
-        foreach (var filePath in allFiles)
+        foreach (var (filePath, mediaRoot) in allFiles)
         {
             if (token.IsCancellationRequested) break;
 
-            var relativePath = Path.GetRelativePath(mediaPath, filePath).Replace('\\', '/');
+            var relativePath = Path.GetRelativePath(mediaRoot, filePath).Replace('\\', '/');
             processedPaths.Add(relativePath);
 
             // Track folder progress
@@ -230,10 +262,9 @@ public class FileIndexerService : BackgroundService
 
                 try
                 {
-                    var fullPath = Path.Combine(mediaPath, file.RelativePath.Replace('/', Path.DirectorySeparatorChar));
-                    if (File.Exists(fullPath))
+                    if (File.Exists(file.FullPath))
                     {
-                        var thumbPath = await thumbService.GenerateThumbnailAsync(fullPath, file.Id, file.Extension);
+                        var thumbPath = await thumbService.GenerateThumbnailAsync(file.FullPath, file.Id, file.Extension);
                         if (thumbPath != null)
                         {
                             thumbResults[file.Id] = thumbPath;
@@ -279,10 +310,9 @@ public class FileIndexerService : BackgroundService
 
                 try
                 {
-                    var fullPath = Path.Combine(mediaPath, file.RelativePath.Replace('/', Path.DirectorySeparatorChar));
-                    if (File.Exists(fullPath))
+                    if (File.Exists(file.FullPath))
                     {
-                        var checksum = await ComputeChecksumAsync(fullPath, pToken);
+                        var checksum = await ComputeChecksumAsync(file.FullPath, pToken);
                         checksumResults[file.Id] = checksum;
                     }
                 }
