@@ -127,6 +127,7 @@ function renderHeader(user: { username: string; role: string } | null): string {
       <div class="header-actions">
         ${user?.role === 'Admin' ? '<button class="btn btn-sm" id="scan-btn">🔄 Scan Now</button>' : ''}
         <div class="user-badge">👤 ${user?.username || 'User'}</div>
+        <button class="btn btn-sm" onclick="location.hash='#/settings'">⚙️</button>
         <button class="btn btn-sm" id="logout-btn">Logout</button>
       </div>
     </header>
