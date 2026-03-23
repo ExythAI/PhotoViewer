@@ -25,7 +25,19 @@ A self-hosted photo and video browser for Windows network shares, running in Doc
 
 ## Quick Start
 
-### Prerequisites
+### One-Line Install
+
+```bash
+curl -sSL https://raw.githubusercontent.com/ExythAI/PhotoViewer/master/install.sh | bash
+```
+
+This will check prerequisites, prompt for your SMB credentials, clone the repo, build the Docker image, and start the container. That's it.
+
+---
+
+### Manual Install
+
+#### Prerequisites
 
 - Docker & Docker Compose on a Linux host
 - `cifs-utils` installed on the host (`sudo apt install cifs-utils`)
