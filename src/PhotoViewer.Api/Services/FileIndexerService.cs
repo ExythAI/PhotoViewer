@@ -190,7 +190,7 @@ public class FileIndexerService : BackgroundService
             "Phase 1 complete: {New} new, {Updated} updated, {Deleted} deleted, {Skipped} skipped",
             newCount, updatedCount, deletedCount, skippedCount);
 
-        // ─── PHASE 2: Generate thumbnails ───
+        // ─── PHASE 2: Generate thumbnails (parallel, 6 workers) ───
         Progress.Status = "Generating thumbnails...";
         var filesNeedingThumbs = await db.MediaFiles
             .Where(m => !m.IsDeleted && m.ThumbnailPath == null)
@@ -200,40 +200,47 @@ public class FileIndexerService : BackgroundService
         var thumbsTotal = filesNeedingThumbs.Count;
         Progress.TotalFiles = thumbsTotal;
         Progress.ProcessedFiles = 0;
-        foreach (var file in filesNeedingThumbs)
-        {
-            if (ct.IsCancellationRequested) break;
-            thumbsDone++;
-            Progress.ProcessedFiles = thumbsDone;
-            Progress.CurrentFile = $"Thumbnail {thumbsDone}/{thumbsTotal}: {file.FileName}";
 
-            try
+        // Collect results from parallel workers
+        var thumbResults = new System.Collections.Concurrent.ConcurrentDictionary<int, string>();
+
+        await Parallel.ForEachAsync(filesNeedingThumbs,
+            new ParallelOptions { MaxDegreeOfParallelism = 6, CancellationToken = ct },
+            async (file, token) =>
             {
-                var fullPath = Path.Combine(mediaPath, file.RelativePath.Replace('/', Path.DirectorySeparatorChar));
-                if (File.Exists(fullPath))
+                var done = Interlocked.Increment(ref thumbsDone);
+                Progress.ProcessedFiles = done;
+                Progress.CurrentFile = $"Thumbnail {done}/{thumbsTotal}: {file.FileName}";
+
+                try
                 {
-                    var thumbPath = await thumbService.GenerateThumbnailAsync(fullPath, file.Id, file.Extension);
-                    if (thumbPath != null)
+                    var fullPath = Path.Combine(mediaPath, file.RelativePath.Replace('/', Path.DirectorySeparatorChar));
+                    if (File.Exists(fullPath))
                     {
-                        file.ThumbnailPath = thumbPath;
+                        var thumbPath = await thumbService.GenerateThumbnailAsync(fullPath, file.Id, file.Extension);
+                        if (thumbPath != null)
+                        {
+                            thumbResults[file.Id] = thumbPath;
+                        }
                     }
                 }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed thumbnail for {File}", file.FileName);
-            }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed thumbnail for {File}", file.FileName);
+                }
+            });
 
-            // Save every 50 thumbnails
-            if (thumbsDone % 50 == 0)
-            {
-                await db.SaveChangesAsync(ct);
-            }
+        // Apply results to DB (single-threaded)
+        foreach (var (fileId, thumbPath) in thumbResults)
+        {
+            var file = filesNeedingThumbs.FirstOrDefault(f => f.Id == fileId);
+            if (file != null) file.ThumbnailPath = thumbPath;
         }
-
         await db.SaveChangesAsync(ct);
 
-        // ─── PHASE 3: Compute checksums for files missing them ───
+        _logger.LogInformation("Phase 2 complete: {Thumbs}/{Total} thumbnails generated", thumbResults.Count, thumbsTotal);
+
+        // ─── PHASE 3: Compute checksums (parallel, 3 workers) ───
         Progress.Status = "Computing checksums...";
         var filesNeedingChecksum = await db.MediaFiles
             .Where(m => !m.IsDeleted && m.Sha256Checksum == null)
@@ -243,32 +250,38 @@ public class FileIndexerService : BackgroundService
         var checksumsTotal = filesNeedingChecksum.Count;
         Progress.TotalFiles = checksumsTotal;
         Progress.ProcessedFiles = 0;
-        foreach (var file in filesNeedingChecksum)
-        {
-            if (ct.IsCancellationRequested) break;
-            checksumsDone++;
-            Progress.ProcessedFiles = checksumsDone;
-            Progress.CurrentFile = $"Checksum {checksumsDone}/{checksumsTotal}: {file.FileName}";
 
-            try
+        var checksumResults = new System.Collections.Concurrent.ConcurrentDictionary<int, string>();
+
+        await Parallel.ForEachAsync(filesNeedingChecksum,
+            new ParallelOptions { MaxDegreeOfParallelism = 3, CancellationToken = ct },
+            async (file, token) =>
             {
-                var fullPath = Path.Combine(mediaPath, file.RelativePath.Replace('/', Path.DirectorySeparatorChar));
-                if (File.Exists(fullPath))
+                var done = Interlocked.Increment(ref checksumsDone);
+                Progress.ProcessedFiles = done;
+                Progress.CurrentFile = $"Checksum {done}/{checksumsTotal}: {file.FileName}";
+
+                try
                 {
-                    file.Sha256Checksum = await ComputeChecksumAsync(fullPath, ct);
+                    var fullPath = Path.Combine(mediaPath, file.RelativePath.Replace('/', Path.DirectorySeparatorChar));
+                    if (File.Exists(fullPath))
+                    {
+                        var checksum = await ComputeChecksumAsync(fullPath, token);
+                        checksumResults[file.Id] = checksum;
+                    }
                 }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed checksum for {File}", file.FileName);
-            }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed checksum for {File}", file.FileName);
+                }
+            });
 
-            if (checksumsDone % 50 == 0)
-            {
-                await db.SaveChangesAsync(ct);
-            }
+        // Apply results to DB (single-threaded)
+        foreach (var (fileId, checksum) in checksumResults)
+        {
+            var file = filesNeedingChecksum.FirstOrDefault(f => f.Id == fileId);
+            if (file != null) file.Sha256Checksum = checksum;
         }
-
         await db.SaveChangesAsync(ct);
 
         Progress.IsScanning = false;
