@@ -82,24 +82,24 @@ echo ""
 echo -e "${BOLD}Network Share Configuration${NC}"
 echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 
-read -p "SMB Share path [//winnfs/FamilyPhotos]: " SMB_SHARE
+read -p "SMB Share path [//winnfs/FamilyPhotos]: " SMB_SHARE < /dev/tty
 SMB_SHARE="${SMB_SHARE:-//winnfs/FamilyPhotos}"
 
-read -p "SMB Username: " SMB_USERNAME
-read -s -p "SMB Password: " SMB_PASSWORD
+read -p "SMB Username: " SMB_USERNAME < /dev/tty
+read -s -p "SMB Password: " SMB_PASSWORD < /dev/tty
 echo ""
 
 echo ""
 echo -e "${BOLD}Application Settings${NC}"
 echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 
-read -p "Port [8080]: " APP_PORT
+read -p "Port [8080]: " APP_PORT < /dev/tty
 APP_PORT="${APP_PORT:-8080}"
 
-read -p "Scan interval in minutes [60]: " SCAN_INTERVAL
+read -p "Scan interval in minutes [60]: " SCAN_INTERVAL < /dev/tty
 SCAN_INTERVAL="${SCAN_INTERVAL:-60}"
 
-read -p "Install directory [${INSTALL_DIR}]: " INPUT_DIR
+read -p "Install directory [${INSTALL_DIR}]: " INPUT_DIR < /dev/tty
 INSTALL_DIR="${INPUT_DIR:-$INSTALL_DIR}"
 
 echo ""
