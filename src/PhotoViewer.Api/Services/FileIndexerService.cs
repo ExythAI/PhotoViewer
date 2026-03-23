@@ -198,10 +198,13 @@ public class FileIndexerService : BackgroundService
 
         var thumbsDone = 0;
         var thumbsTotal = filesNeedingThumbs.Count;
+        Progress.TotalFiles = thumbsTotal;
+        Progress.ProcessedFiles = 0;
         foreach (var file in filesNeedingThumbs)
         {
             if (ct.IsCancellationRequested) break;
             thumbsDone++;
+            Progress.ProcessedFiles = thumbsDone;
             Progress.CurrentFile = $"Thumbnail {thumbsDone}/{thumbsTotal}: {file.FileName}";
 
             try
@@ -238,10 +241,13 @@ public class FileIndexerService : BackgroundService
 
         var checksumsDone = 0;
         var checksumsTotal = filesNeedingChecksum.Count;
+        Progress.TotalFiles = checksumsTotal;
+        Progress.ProcessedFiles = 0;
         foreach (var file in filesNeedingChecksum)
         {
             if (ct.IsCancellationRequested) break;
             checksumsDone++;
+            Progress.ProcessedFiles = checksumsDone;
             Progress.CurrentFile = $"Checksum {checksumsDone}/{checksumsTotal}: {file.FileName}";
 
             try
