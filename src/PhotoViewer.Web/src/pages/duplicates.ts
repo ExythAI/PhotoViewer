@@ -1,18 +1,28 @@
 import { api, getCurrentUser, clearAuth } from '../api/client';
 import { navigate } from '../router';
-import { getApp, formatFileSize, formatDate, showToast } from '../utils';
+import { getApp, formatFileSize, showToast } from '../utils';
+import { renderDetail } from './detail';
+
+interface DuplicateFile {
+  id: number;
+  fileName: string;
+  relativePath: string;
+  extension: string;
+  fileSize: number;
+  mediaType: string;
+  hasThumbnail: boolean;
+  width: number | null;
+  height: number | null;
+  durationSeconds: number | null;
+  takenDate: string | null;
+  indexedAt: string;
+  checksum: string | null;
+}
 
 interface DuplicateGroup {
   checksum: string;
   count: number;
-  files: {
-    id: number;
-    fileName: string;
-    relativePath: string;
-    fileSize: number;
-    mediaType: string;
-    hasThumbnail: boolean;
-  }[];
+  files: DuplicateFile[];
 }
 
 export function renderDuplicates(): void {
@@ -85,21 +95,36 @@ async function loadDuplicates(): Promise<void> {
           <span class="checksum">SHA-256: ${group.checksum?.substring(0, 24)}…</span>
           <span style="font-size:12px;color:var(--text-muted)">${formatFileSize(group.files[0]?.fileSize || 0)} each</span>
         </div>
-        <div class="duplicate-files">
-          ${group.files.map(f => `
-            <div class="media-card" style="aspect-ratio:auto;cursor:pointer" onclick="location.hash='#/gallery'">
-              ${f.hasThumbnail
-                ? `<img src="${api.getThumbnailUrl(f.id)}" alt="${f.fileName}" style="width:100%;height:120px;object-fit:cover" />`
-                : `<div class="media-placeholder" style="height:120px">${f.mediaType === 'Video' ? '🎬' : '🖼'}</div>`
-              }
-              <div style="padding:8px">
-                <div style="font-size:12px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${f.fileName}</div>
-                <div style="font-size:11px;color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${f.relativePath}</div>
-              </div>
-            </div>
-          `).join('')}
-        </div>
+        <div class="duplicate-files"></div>
       `;
+
+      const filesContainer = div.querySelector('.duplicate-files')!;
+
+      group.files.forEach((f, idx) => {
+        const card = document.createElement('div');
+        card.className = 'media-card';
+        card.style.aspectRatio = 'auto';
+        card.style.cursor = 'pointer';
+
+        card.innerHTML = `
+          ${f.hasThumbnail
+            ? `<img src="${api.getThumbnailUrl(f.id)}" alt="${f.fileName}" style="width:100%;height:120px;object-fit:cover" />`
+            : `<div class="media-placeholder" style="height:120px">${f.mediaType === 'Video' ? '🎬' : '🖼'}</div>`
+          }
+          <div style="padding:8px">
+            <div style="font-size:12px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${f.fileName}</div>
+            <div style="font-size:11px;color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${f.relativePath}</div>
+          </div>
+        `;
+
+        // Open detail overlay instead of navigating away
+        card.addEventListener('click', () => {
+          renderDetail(group.files as any[], idx);
+        });
+
+        filesContainer.appendChild(card);
+      });
+
       container.appendChild(div);
     });
   } catch (err) {

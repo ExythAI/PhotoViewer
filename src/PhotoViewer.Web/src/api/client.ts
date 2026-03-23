@@ -94,6 +94,22 @@ export const api = {
 
   triggerScan: () => request('/media/scan', { method: 'POST' }),
 
+  getScanStatus: () => request<{
+    isScanning: boolean;
+    totalFiles: number;
+    processedFiles: number;
+    totalFolders: number;
+    scannedFolders: number;
+    newFiles: number;
+    updatedFiles: number;
+    deletedFiles: number;
+    percentComplete: number;
+    currentFile: string;
+    lastScanStarted: string | null;
+    lastScanCompleted: string | null;
+    status: string;
+  }>('/media/scan/status'),
+
   // Downloads
   createDownload: (mediaFileIds: number[]) =>
     request<{ id: number; status: string }>('/download', {

@@ -5,11 +5,30 @@ using PhotoViewer.Api.Models;
 
 namespace PhotoViewer.Api.Services;
 
+public class ScanProgress
+{
+    public bool IsScanning { get; set; }
+    public int TotalFiles { get; set; }
+    public int ProcessedFiles { get; set; }
+    public int TotalFolders { get; set; }
+    public int ScannedFolders { get; set; }
+    public int NewFiles { get; set; }
+    public int UpdatedFiles { get; set; }
+    public int DeletedFiles { get; set; }
+    public double PercentComplete => TotalFiles > 0 ? Math.Round((double)ProcessedFiles / TotalFiles * 100, 1) : 0;
+    public string CurrentFile { get; set; } = string.Empty;
+    public DateTime? LastScanStarted { get; set; }
+    public DateTime? LastScanCompleted { get; set; }
+    public string Status { get; set; } = "Idle";
+}
+
 public class FileIndexerService : BackgroundService
 {
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IConfiguration _config;
     private readonly ILogger<FileIndexerService> _logger;
+
+    public static ScanProgress Progress { get; } = new();
 
     public FileIndexerService(
         IServiceScopeFactory scopeFactory,
@@ -48,9 +67,19 @@ public class FileIndexerService : BackgroundService
         var mediaPath = _config["Storage:MediaPath"] ?? "/media";
         _logger.LogInformation("Starting file scan of {Path}", mediaPath);
 
+        Progress.IsScanning = true;
+        Progress.LastScanStarted = DateTime.UtcNow;
+        Progress.Status = "Starting scan...";
+        Progress.ProcessedFiles = 0;
+        Progress.NewFiles = 0;
+        Progress.UpdatedFiles = 0;
+        Progress.DeletedFiles = 0;
+
         if (!Directory.Exists(mediaPath))
         {
             _logger.LogWarning("Media path {Path} does not exist, skipping scan", mediaPath);
+            Progress.IsScanning = false;
+            Progress.Status = "Media path not found";
             return;
         }
 
@@ -58,17 +87,27 @@ public class FileIndexerService : BackgroundService
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var thumbService = scope.ServiceProvider.GetRequiredService<ThumbnailService>();
 
+        // Count folders first
+        Progress.Status = "Discovering files...";
+        var allFolders = Directory.GetDirectories(mediaPath, "*", SearchOption.AllDirectories);
+        Progress.TotalFolders = allFolders.Length + 1; // +1 for root
+        Progress.ScannedFolders = 0;
+
         var allFiles = Directory.EnumerateFiles(mediaPath, "*", SearchOption.AllDirectories)
             .Where(f => ThumbnailService.IsSupported(Path.GetExtension(f)))
             .ToList();
 
-        _logger.LogInformation("Found {Count} supported files", allFiles.Count);
+        Progress.TotalFiles = allFiles.Count;
+        _logger.LogInformation("Found {Count} supported files in {Folders} folders", allFiles.Count, Progress.TotalFolders);
+
+        Progress.Status = "Indexing files...";
 
         var existingFiles = await db.MediaFiles
             .Where(m => !m.IsDeleted)
             .ToDictionaryAsync(m => m.RelativePath, ct);
 
         var processedPaths = new HashSet<string>();
+        var processedFolders = new HashSet<string>();
         var newCount = 0;
         var updatedCount = 0;
 
@@ -79,6 +118,16 @@ public class FileIndexerService : BackgroundService
             var relativePath = Path.GetRelativePath(mediaPath, filePath).Replace('\\', '/');
             processedPaths.Add(relativePath);
 
+            // Track folder progress
+            var folder = Path.GetDirectoryName(relativePath) ?? "";
+            if (processedFolders.Add(folder))
+            {
+                Progress.ScannedFolders = processedFolders.Count;
+            }
+
+            Progress.ProcessedFiles++;
+            Progress.CurrentFile = Path.GetFileName(filePath);
+
             var fileInfo = new FileInfo(filePath);
 
             if (existingFiles.TryGetValue(relativePath, out var existing))
@@ -88,6 +137,7 @@ public class FileIndexerService : BackgroundService
                 {
                     await UpdateMediaFileAsync(existing, filePath, fileInfo, thumbService);
                     updatedCount++;
+                    Progress.UpdatedFiles = updatedCount;
                 }
                 else if (string.IsNullOrEmpty(existing.ThumbnailPath))
                 {
@@ -105,6 +155,7 @@ public class FileIndexerService : BackgroundService
                 var mediaFile = await CreateMediaFileAsync(filePath, relativePath, fileInfo, thumbService);
                 db.MediaFiles.Add(mediaFile);
                 newCount++;
+                Progress.NewFiles = newCount;
             }
 
             // Save in batches of 100
@@ -115,6 +166,7 @@ public class FileIndexerService : BackgroundService
         }
 
         // Mark deleted files
+        Progress.Status = "Checking for deleted files...";
         var deletedCount = 0;
         foreach (var existing in existingFiles.Values)
         {
@@ -124,14 +176,17 @@ public class FileIndexerService : BackgroundService
                 deletedCount++;
             }
         }
+        Progress.DeletedFiles = deletedCount;
 
         await db.SaveChangesAsync(ct);
 
         // Generate thumbnails for new files (need IDs after save)
+        Progress.Status = "Generating thumbnails...";
         var newFilesWithoutThumbs = await db.MediaFiles
             .Where(m => !m.IsDeleted && m.ThumbnailPath == null)
             .ToListAsync(ct);
 
+        var thumbsDone = 0;
         foreach (var file in newFilesWithoutThumbs)
         {
             if (ct.IsCancellationRequested) break;
@@ -145,9 +200,16 @@ public class FileIndexerService : BackgroundService
                     file.ThumbnailPath = thumbPath;
                 }
             }
+            thumbsDone++;
+            Progress.CurrentFile = $"Thumbnail {thumbsDone}/{newFilesWithoutThumbs.Count}";
         }
 
         await db.SaveChangesAsync(ct);
+
+        Progress.IsScanning = false;
+        Progress.LastScanCompleted = DateTime.UtcNow;
+        Progress.Status = "Idle";
+        Progress.CurrentFile = string.Empty;
 
         _logger.LogInformation(
             "Scan complete: {New} new, {Updated} updated, {Deleted} deleted",

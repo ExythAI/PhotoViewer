@@ -224,6 +224,12 @@ public class MediaController : ControllerBase
         return Ok(duplicates);
     }
 
+    [HttpGet("scan/status")]
+    public IActionResult GetScanStatus()
+    {
+        return Ok(FileIndexerService.Progress);
+    }
+
     [HttpPost("scan")]
     [Authorize(Roles = "Admin")]
     public IActionResult TriggerScan()

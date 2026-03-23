@@ -48,6 +48,7 @@ export function renderGallery(): void {
     ${renderHeader(user)}
     <div class="content-area">
       <div id="stats-bar" class="stats-bar"></div>
+      <div id="scan-progress" class="scan-progress" style="display:none"></div>
       <div class="gallery-toolbar">
         <div class="search-bar">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -108,6 +109,7 @@ export function renderGallery(): void {
   loadStats();
   loadFolders();
   loadMedia();
+  pollScanStatus();
 }
 
 function renderHeader(user: { username: string; role: string } | null): string {
@@ -129,6 +131,79 @@ function renderHeader(user: { username: string; role: string } | null): string {
       </div>
     </header>
   `;
+}
+
+let scanPollTimer: ReturnType<typeof setInterval> | null = null;
+let wasScanning = false;
+
+function pollScanStatus(): void {
+  // Clear any previous timer
+  if (scanPollTimer) clearInterval(scanPollTimer);
+
+  const update = async () => {
+    const el = document.getElementById('scan-progress');
+    if (!el) {
+      if (scanPollTimer) clearInterval(scanPollTimer);
+      return;
+    }
+
+    try {
+      const s = await api.getScanStatus();
+
+      if (s.isScanning) {
+        wasScanning = true;
+        el.style.display = 'block';
+        el.innerHTML = `
+          <div class="scan-progress-header">
+            <span class="scan-status-label">🔄 ${s.status}</span>
+            <span class="scan-percent">${s.percentComplete}%</span>
+          </div>
+          <div class="scan-bar-track">
+            <div class="scan-bar-fill" style="width:${s.percentComplete}%"></div>
+          </div>
+          <div class="scan-details">
+            <span>📁 Folders: ${s.scannedFolders}/${s.totalFolders}</span>
+            <span>📄 Files: ${s.processedFiles.toLocaleString()}/${s.totalFiles.toLocaleString()}</span>
+            <span>🆕 New: ${s.newFiles}</span>
+            <span>✏️ Updated: ${s.updatedFiles}</span>
+            ${s.currentFile ? `<span>📎 ${s.currentFile}</span>` : ''}
+          </div>
+        `;
+      } else {
+        if (wasScanning) {
+          // Scan just finished — refresh gallery data
+          wasScanning = false;
+          el.style.display = 'block';
+          el.innerHTML = `
+            <div class="scan-progress-header">
+              <span class="scan-status-label">✅ Scan complete</span>
+              <span class="scan-percent">100%</span>
+            </div>
+            <div class="scan-bar-track">
+              <div class="scan-bar-fill" style="width:100%"></div>
+            </div>
+            <div class="scan-details">
+              <span>🆕 New: ${s.newFiles}</span>
+              <span>✏️ Updated: ${s.updatedFiles}</span>
+              <span>🗑️ Deleted: ${s.deletedFiles}</span>
+            </div>
+          `;
+          // Refresh gallery data
+          loadStats();
+          loadMedia();
+          // Hide after 10 seconds
+          setTimeout(() => {
+            if (el) el.style.display = 'none';
+          }, 10000);
+        } else {
+          el.style.display = 'none';
+        }
+      }
+    } catch {}
+  };
+
+  update();
+  scanPollTimer = setInterval(update, 2000);
 }
 
 function setupEventListeners(): void {
@@ -200,6 +275,8 @@ function setupEventListeners(): void {
     try {
       await api.triggerScan();
       showToast('Scan started!');
+      wasScanning = false; // Reset so we detect the new scan
+      pollScanStatus();
     } catch {
       showToast('Failed to start scan', 'error');
     }
