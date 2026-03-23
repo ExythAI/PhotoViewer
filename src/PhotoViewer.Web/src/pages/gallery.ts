@@ -1,5 +1,5 @@
 import { api, getCurrentUser, clearAuth } from '../api/client';
-import { navigate, setCleanup } from '../router';
+import { navigate } from '../router';
 import { getApp, formatFileSize, formatDate, formatDuration, showToast } from '../utils';
 import { renderDetail } from './detail';
 
@@ -22,15 +22,17 @@ interface MediaFile {
 let allItems: MediaFile[] = [];
 let currentPage = 1;
 let totalCount = 0;
+let totalPages = 0;
 let isLoading = false;
-let hasMore = true;
 let selectedIds = new Set<number>();
 let searchQuery = '';
 let typeFilter = '';
 let sortBy = 'takenDate';
 let sortDir = 'desc';
 let folderFilter = '';
-let observer: IntersectionObserver | null = null;
+let dateFrom = '';
+let dateTo = '';
+const PAGE_SIZE = 50;
 
 export function renderGallery(): void {
   const app = getApp();
@@ -39,7 +41,7 @@ export function renderGallery(): void {
   allItems = [];
   currentPage = 1;
   totalCount = 0;
-  hasMore = true;
+  totalPages = 0;
   selectedIds = new Set();
 
   app.innerHTML = `
@@ -72,9 +74,18 @@ export function renderGallery(): void {
           </select>
         </div>
       </div>
+      <div class="gallery-toolbar" style="padding-top:0">
+        <div class="filter-group">
+          <label style="font-size:13px;color:var(--text-muted);white-space:nowrap">Date Range:</label>
+          <input type="date" class="input" id="date-from" value="${dateFrom}" />
+          <span style="color:var(--text-muted)">to</span>
+          <input type="date" class="input" id="date-to" value="${dateTo}" />
+          <button class="btn btn-sm" id="clear-dates" style="font-size:12px" ${!dateFrom && !dateTo ? 'style="display:none"' : ''}>✕ Clear</button>
+        </div>
+      </div>
       <div id="media-grid" class="media-grid"></div>
       <div id="loading" class="loading-spinner" style="display:none"></div>
-      <div id="load-more" class="load-more-trigger"></div>
+      <div id="pagination" class="pagination" style="display:none"></div>
       <div id="gallery-empty" class="gallery-empty" style="display:none">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
           <rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/>
@@ -97,22 +108,6 @@ export function renderGallery(): void {
   loadStats();
   loadFolders();
   loadMedia();
-
-  // Infinite scroll observer
-  const trigger = document.getElementById('load-more')!;
-  observer = new IntersectionObserver((entries) => {
-    if (entries[0].isIntersecting && hasMore && !isLoading) {
-      loadMedia();
-    }
-  }, { rootMargin: '200px' });
-  observer.observe(trigger);
-
-  setCleanup(() => {
-    if (observer) {
-      observer.disconnect();
-      observer = null;
-    }
-  });
 }
 
 function renderHeader(user: { username: string; role: string } | null): string {
@@ -142,13 +137,15 @@ function setupEventListeners(): void {
     clearTimeout(searchTimeout);
     searchTimeout = setTimeout(() => {
       searchQuery = (e.target as HTMLInputElement).value;
-      resetAndReload();
+      currentPage = 1;
+      loadMedia();
     }, 300);
   });
 
   document.getElementById('type-filter')?.addEventListener('change', (e) => {
     typeFilter = (e.target as HTMLSelectElement).value;
-    resetAndReload();
+    currentPage = 1;
+    loadMedia();
   });
 
   document.getElementById('sort-select')?.addEventListener('change', (e) => {
@@ -156,12 +153,35 @@ function setupEventListeners(): void {
     const [s, d] = val.split('-');
     sortBy = s;
     sortDir = d;
-    resetAndReload();
+    currentPage = 1;
+    loadMedia();
   });
 
   document.getElementById('folder-filter')?.addEventListener('change', (e) => {
     folderFilter = (e.target as HTMLSelectElement).value;
-    resetAndReload();
+    currentPage = 1;
+    loadMedia();
+  });
+
+  document.getElementById('date-from')?.addEventListener('change', (e) => {
+    dateFrom = (e.target as HTMLInputElement).value;
+    currentPage = 1;
+    loadMedia();
+  });
+
+  document.getElementById('date-to')?.addEventListener('change', (e) => {
+    dateTo = (e.target as HTMLInputElement).value;
+    currentPage = 1;
+    loadMedia();
+  });
+
+  document.getElementById('clear-dates')?.addEventListener('click', () => {
+    dateFrom = '';
+    dateTo = '';
+    (document.getElementById('date-from') as HTMLInputElement).value = '';
+    (document.getElementById('date-to') as HTMLInputElement).value = '';
+    currentPage = 1;
+    loadMedia();
   });
 
   document.getElementById('download-selected')?.addEventListener('click', downloadSelected);
@@ -184,14 +204,6 @@ function setupEventListeners(): void {
       showToast('Failed to start scan', 'error');
     }
   });
-}
-
-function resetAndReload(): void {
-  allItems = [];
-  currentPage = 1;
-  hasMore = true;
-  document.getElementById('media-grid')!.innerHTML = '';
-  loadMedia();
 }
 
 async function loadStats(): Promise<void> {
@@ -222,27 +234,30 @@ async function loadFolders(): Promise<void> {
 }
 
 async function loadMedia(): Promise<void> {
-  if (isLoading || !hasMore) return;
+  if (isLoading) return;
   isLoading = true;
   document.getElementById('loading')!.style.display = 'flex';
+  document.getElementById('media-grid')!.innerHTML = '';
 
   try {
     const result = await api.getMedia({
       search: searchQuery || undefined,
       folder: folderFilter || undefined,
       type: typeFilter || undefined,
+      dateFrom: dateFrom || undefined,
+      dateTo: dateTo || undefined,
       sortBy,
       sortDir,
       page: currentPage,
-      pageSize: 50,
+      pageSize: PAGE_SIZE,
     });
 
     totalCount = result.totalCount;
-    allItems.push(...result.items);
-    currentPage++;
-    hasMore = allItems.length < totalCount;
+    totalPages = Math.ceil(totalCount / PAGE_SIZE);
+    allItems = result.items;
 
     renderMediaItems(result.items);
+    renderPagination();
 
     document.getElementById('gallery-empty')!.style.display =
       allItems.length === 0 ? 'flex' : 'none';
@@ -290,6 +305,67 @@ function renderMediaItems(items: MediaFile[]): void {
     });
 
     grid.appendChild(card);
+  });
+}
+
+function renderPagination(): void {
+  const pag = document.getElementById('pagination')!;
+
+  if (totalPages <= 1) {
+    pag.style.display = 'none';
+    return;
+  }
+
+  pag.style.display = 'flex';
+
+  const startItem = (currentPage - 1) * PAGE_SIZE + 1;
+  const endItem = Math.min(currentPage * PAGE_SIZE, totalCount);
+
+  let buttons = '';
+
+  // Previous
+  buttons += `<button class="page-btn" ${currentPage <= 1 ? 'disabled' : ''} data-page="${currentPage - 1}">‹ Prev</button>`;
+
+  // Page numbers
+  const maxVisible = 7;
+  let startPage = Math.max(1, currentPage - Math.floor(maxVisible / 2));
+  let endPage = Math.min(totalPages, startPage + maxVisible - 1);
+  if (endPage - startPage < maxVisible - 1) {
+    startPage = Math.max(1, endPage - maxVisible + 1);
+  }
+
+  if (startPage > 1) {
+    buttons += `<button class="page-btn" data-page="1">1</button>`;
+    if (startPage > 2) buttons += `<span class="page-dots">…</span>`;
+  }
+
+  for (let i = startPage; i <= endPage; i++) {
+    buttons += `<button class="page-btn${i === currentPage ? ' active' : ''}" data-page="${i}">${i}</button>`;
+  }
+
+  if (endPage < totalPages) {
+    if (endPage < totalPages - 1) buttons += `<span class="page-dots">…</span>`;
+    buttons += `<button class="page-btn" data-page="${totalPages}">${totalPages}</button>`;
+  }
+
+  // Next
+  buttons += `<button class="page-btn" ${currentPage >= totalPages ? 'disabled' : ''} data-page="${currentPage + 1}">Next ›</button>`;
+
+  pag.innerHTML = `
+    <span class="page-info">Showing ${startItem}–${endItem} of ${totalCount.toLocaleString()}</span>
+    <div class="page-buttons">${buttons}</div>
+  `;
+
+  // Attach click handlers
+  pag.querySelectorAll('.page-btn:not([disabled])').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const page = parseInt((btn as HTMLElement).dataset.page || '1');
+      if (page !== currentPage) {
+        currentPage = page;
+        loadMedia();
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      }
+    });
   });
 }
 

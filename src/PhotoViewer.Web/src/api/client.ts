@@ -56,6 +56,8 @@ export const api = {
     search?: string;
     folder?: string;
     type?: string;
+    dateFrom?: string;
+    dateTo?: string;
     sortBy?: string;
     sortDir?: string;
     page?: number;
@@ -65,6 +67,8 @@ export const api = {
     if (params.search) qs.set('search', params.search);
     if (params.folder) qs.set('folder', params.folder);
     if (params.type) qs.set('type', params.type);
+    if (params.dateFrom) qs.set('dateFrom', params.dateFrom);
+    if (params.dateTo) qs.set('dateTo', params.dateTo);
     if (params.sortBy) qs.set('sortBy', params.sortBy);
     if (params.sortDir) qs.set('sortDir', params.sortDir);
     if (params.page) qs.set('page', params.page.toString());

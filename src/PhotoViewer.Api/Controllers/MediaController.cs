@@ -55,6 +55,8 @@ public class MediaController : ControllerBase
         [FromQuery] string? search = null,
         [FromQuery] string? folder = null,
         [FromQuery] string? type = null,
+        [FromQuery] string? dateFrom = null,
+        [FromQuery] string? dateTo = null,
         [FromQuery] string? sortBy = "takenDate",
         [FromQuery] string? sortDir = "desc",
         [FromQuery] int page = 1,
@@ -77,6 +79,17 @@ public class MediaController : ControllerBase
         {
             if (Enum.TryParse<MediaType>(type, true, out var mediaType))
                 query = query.Where(m => m.MediaType == mediaType);
+        }
+
+        if (DateTime.TryParse(dateFrom, out var from))
+        {
+            query = query.Where(m => m.TakenDate >= from || (m.TakenDate == null && m.IndexedAt >= from));
+        }
+
+        if (DateTime.TryParse(dateTo, out var to))
+        {
+            var toEnd = to.Date.AddDays(1); // Include the entire "to" day
+            query = query.Where(m => m.TakenDate < toEnd || (m.TakenDate == null && m.IndexedAt < toEnd));
         }
 
         var totalCount = await query.CountAsync();
