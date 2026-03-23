@@ -144,7 +144,9 @@ echo ""
 sed -i 's/\r$//' docker-compose.yml .env 2>/dev/null
 
 # Remove stale containers and volumes from previous failed runs
-$COMPOSE_CMD down --volumes 2>/dev/null || true
+docker stop photoviewer 2>/dev/null || true
+docker rm photoviewer 2>/dev/null || true
+docker volume rm photoviewer_photos_media photoviewer_app_data 2>/dev/null || true
 
 $COMPOSE_CMD up -d --build
 
