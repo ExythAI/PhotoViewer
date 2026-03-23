@@ -57,6 +57,7 @@ public class MediaController : ControllerBase
         [FromQuery] string? type = null,
         [FromQuery] string? dateFrom = null,
         [FromQuery] string? dateTo = null,
+        [FromQuery] bool hideDuplicates = true,
         [FromQuery] string? sortBy = "takenDate",
         [FromQuery] string? sortDir = "desc",
         [FromQuery] int page = 1,
@@ -90,6 +91,18 @@ public class MediaController : ControllerBase
         {
             var toEnd = to.Date.AddDays(1); // Include the entire "to" day
             query = query.Where(m => m.TakenDate < toEnd || (m.TakenDate == null && m.IndexedAt < toEnd));
+        }
+
+        // Hide duplicates: keep only the first file (lowest ID) per checksum
+        if (hideDuplicates)
+        {
+            var duplicateIdsToHide = _db.MediaFiles
+                .Where(m => !m.IsDeleted && m.Sha256Checksum != null)
+                .GroupBy(m => m.Sha256Checksum)
+                .Where(g => g.Count() > 1)
+                .SelectMany(g => g.OrderBy(m => m.Id).Skip(1).Select(m => m.Id));
+
+            query = query.Where(m => !duplicateIdsToHide.Contains(m.Id));
         }
 
         var totalCount = await query.CountAsync();
