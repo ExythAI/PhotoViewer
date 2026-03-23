@@ -83,12 +83,16 @@ echo ""
 echo -e "${BOLD}Network Share Configuration${NC}"
 echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 
-read -p "SMB Share path [//winnfs/FamilyPhotos]: " SMB_SHARE < /dev/tty
-SMB_SHARE="${SMB_SHARE:-//winnfs/FamilyPhotos}"
+read -p "SMB Share path [//192.168.0.252/FamilyPhotos]: " SMB_SHARE < /dev/tty
+SMB_SHARE="${SMB_SHARE:-//192.168.0.252/FamilyPhotos}"
 
 read -p "SMB Username: " SMB_USERNAME < /dev/tty
 read -s -p "SMB Password: " SMB_PASSWORD < /dev/tty
 echo ""
+
+MOUNT_POINT="/mnt/FamilyPhotos"
+read -p "Host mount point [${MOUNT_POINT}]: " INPUT_MOUNT < /dev/tty
+MOUNT_POINT="${INPUT_MOUNT:-$MOUNT_POINT}"
 
 echo ""
 echo -e "${BOLD}Application Settings${NC}"
@@ -124,14 +128,38 @@ fi
 
 echo -e "${GREEN}✓${NC} Source ready"
 
+# ---- Mount network share on host ----
+echo -e "${YELLOW}→${NC} Mounting network share..."
+sudo mkdir -p "$MOUNT_POINT"
+
+# Mount if not already mounted
+if ! mountpoint -q "$MOUNT_POINT" 2>/dev/null; then
+    sudo mount -t cifs "$SMB_SHARE" "$MOUNT_POINT" \
+      -o "username=${SMB_USERNAME},password=${SMB_PASSWORD},vers=3.0,uid=1000,gid=1000,file_mode=0755,dir_mode=0755"
+    echo -e "${GREEN}✓${NC} Network share mounted at ${MOUNT_POINT}"
+else
+    echo -e "${GREEN}✓${NC} Network share already mounted at ${MOUNT_POINT}"
+fi
+
+# Add to fstab for auto-mount on reboot
+FSTAB_ENTRY="${SMB_SHARE} ${MOUNT_POINT} cifs username=${SMB_USERNAME},password=${SMB_PASSWORD},vers=3.0,uid=1000,gid=1000,file_mode=0755,dir_mode=0755,_netdev,nofail 0 0"
+if ! grep -qF "$MOUNT_POINT" /etc/fstab 2>/dev/null; then
+    echo "$FSTAB_ENTRY" | sudo tee -a /etc/fstab > /dev/null
+    echo -e "${GREEN}✓${NC} Added to /etc/fstab for auto-mount on reboot"
+fi
+
 # ---- Generate .env ----
 JWT_KEY=$(openssl rand -base64 48 2>/dev/null | tr -d '\r\n' || head -c 64 /dev/urandom | base64 | tr -d '\r\n')
 
-printf "SMB_SHARE=%s\nSMB_USERNAME=%s\nSMB_PASSWORD=%s\nAPP_PORT=%s\nSCAN_INTERVAL=%s\nJWT_KEY=%s\n" \
-  "$SMB_SHARE" "$SMB_USERNAME" "$SMB_PASSWORD" "$APP_PORT" "$SCAN_INTERVAL" "$JWT_KEY" > .env
+printf "SCAN_INTERVAL=%s\nJWT_KEY=%s\n" \
+  "$SCAN_INTERVAL" "$JWT_KEY" > .env
 
 chmod 600 .env
 echo -e "${GREEN}✓${NC} Configuration saved (.env)"
+
+# ---- Update docker-compose with correct mount point and port ----
+sed -i "s|/mnt/FamilyPhotos:/media:ro|${MOUNT_POINT}:/media:ro|g" docker-compose.yml
+sed -i "s|\"8080:8080\"|\"${APP_PORT}:8080\"|g" docker-compose.yml
 
 # ---- Build & Start ----
 echo ""

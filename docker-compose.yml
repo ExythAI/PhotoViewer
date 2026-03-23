@@ -1,7 +1,9 @@
 # PhotoViewer - Docker Compose
 # 
-# All configuration is read from the .env file.
-# See .env.example for available settings.
+# Mount your network share on the host first:
+#   sudo mount -t cifs //192.168.0.252/FamilyPhotos /mnt/FamilyPhotos -o username=USER,password=PASS,vers=3.0,uid=1000,gid=1000
+#
+# Then run: docker compose up -d --build
 
 services:
   photoviewer:
@@ -12,7 +14,7 @@ services:
       - "8080:8080"
     volumes:
       - app_data:/data
-      - photos_media:/media
+      - /mnt/FamilyPhotos:/media:ro
     environment:
       - Storage__MediaPath=/media
       - Storage__DatabasePath=/data/photoviewer.db
@@ -29,11 +31,3 @@ services:
 volumes:
   app_data:
     driver: local
-  
-  # CIFS mount for network share
-  photos_media:
-    driver: local
-    driver_opts:
-      type: cifs
-      o: "username=${SMB_USERNAME},password=${SMB_PASSWORD},vers=3.0,uid=1000,gid=1000,file_mode=0755,dir_mode=0755"
-      device: "${SMB_SHARE:-//winnfs/FamilyPhotos}"
