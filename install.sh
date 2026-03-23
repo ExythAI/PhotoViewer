@@ -124,17 +124,10 @@ fi
 echo -e "${GREEN}✓${NC} Source ready"
 
 # ---- Generate .env ----
-JWT_KEY=$(openssl rand -base64 48 2>/dev/null || head -c 64 /dev/urandom | base64 | tr -d '\n')
+JWT_KEY=$(openssl rand -base64 48 2>/dev/null | tr -d '\r\n' || head -c 64 /dev/urandom | base64 | tr -d '\r\n')
 
-cat > .env <<EOF
-# PhotoViewer Configuration — generated $(date -Iseconds)
-SMB_SHARE=${SMB_SHARE}
-SMB_USERNAME=${SMB_USERNAME}
-SMB_PASSWORD=${SMB_PASSWORD}
-APP_PORT=${APP_PORT}
-SCAN_INTERVAL=${SCAN_INTERVAL}
-JWT_KEY=${JWT_KEY}
-EOF
+printf "SMB_SHARE=%s\nSMB_USERNAME=%s\nSMB_PASSWORD=%s\nAPP_PORT=%s\nSCAN_INTERVAL=%s\nJWT_KEY=%s\n" \
+  "$SMB_SHARE" "$SMB_USERNAME" "$SMB_PASSWORD" "$APP_PORT" "$SCAN_INTERVAL" "$JWT_KEY" > .env
 
 chmod 600 .env
 echo -e "${GREEN}✓${NC} Configuration saved (.env)"
