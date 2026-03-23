@@ -11,7 +11,7 @@ RUN npm run build
 # ---- Stage 2: Build the .NET backend ----
 FROM mcr.microsoft.com/dotnet/sdk:8.0 AS backend-build
 WORKDIR /build
-COPY PhotoViewer.sln ./
+COPY PhotoViewer.slnx ./
 COPY src/PhotoViewer.Api/ src/PhotoViewer.Api/
 RUN dotnet publish src/PhotoViewer.Api/PhotoViewer.Api.csproj \
     -c Release \
