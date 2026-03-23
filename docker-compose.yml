@@ -27,7 +27,7 @@ services:
       - Storage__ThumbnailPath=/data/thumbnails
       - Storage__DownloadPath=/data/downloads
       - Scanner__IntervalMinutes=${SCAN_INTERVAL:-60}
-      - Jwt__Key=${JWT_KEY:-PhotoViewerDefaultSecretKey2026!@#$%^&*()}
+      - Jwt__Key=${JWT_KEY:-PhotoViewerSuperSecretDefaultKey2026}
     logging:
       driver: "json-file"
       options:
