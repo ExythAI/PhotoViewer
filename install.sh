@@ -139,6 +139,9 @@ echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━�
 echo -e "${YELLOW}(this may take a few minutes on first run)${NC}"
 echo ""
 
+# Strip any Windows CRLF line endings from config files
+sed -i 's/\r$//' docker-compose.yml .env 2>/dev/null
+
 $COMPOSE_CMD up -d --build
 
 echo ""
