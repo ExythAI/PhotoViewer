@@ -15,6 +15,7 @@ public class ScanProgress
     public int NewFiles { get; set; }
     public int UpdatedFiles { get; set; }
     public int DeletedFiles { get; set; }
+    public int SkippedFiles { get; set; }
     public double PercentComplete => TotalFiles > 0 ? Math.Round((double)ProcessedFiles / TotalFiles * 100, 1) : 0;
     public string CurrentFile { get; set; } = string.Empty;
     public DateTime? LastScanStarted { get; set; }
@@ -54,6 +55,8 @@ public class FileIndexerService : BackgroundService
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error during file scan");
+                Progress.IsScanning = false;
+                Progress.Status = $"Scan failed: {ex.Message}";
             }
 
             var intervalMinutes = _config.GetValue("Scanner:IntervalMinutes", 60);
@@ -74,6 +77,7 @@ public class FileIndexerService : BackgroundService
         Progress.NewFiles = 0;
         Progress.UpdatedFiles = 0;
         Progress.DeletedFiles = 0;
+        Progress.SkippedFiles = 0;
 
         if (!Directory.Exists(mediaPath))
         {
@@ -110,7 +114,9 @@ public class FileIndexerService : BackgroundService
         var processedFolders = new HashSet<string>();
         var newCount = 0;
         var updatedCount = 0;
+        var skippedCount = 0;
 
+        // ─── PHASE 1: Fast index (metadata only, no checksums, no thumbnails) ───
         foreach (var filePath in allFiles)
         {
             if (ct.IsCancellationRequested) break;
@@ -128,38 +134,38 @@ public class FileIndexerService : BackgroundService
             Progress.ProcessedFiles++;
             Progress.CurrentFile = Path.GetFileName(filePath);
 
-            var fileInfo = new FileInfo(filePath);
-
-            if (existingFiles.TryGetValue(relativePath, out var existing))
+            try
             {
-                // Check if file was modified
-                if (existing.FileModifiedAt != fileInfo.LastWriteTimeUtc || existing.FileSize != fileInfo.Length)
+                var fileInfo = new FileInfo(filePath);
+
+                if (existingFiles.TryGetValue(relativePath, out var existing))
                 {
-                    await UpdateMediaFileAsync(existing, filePath, fileInfo, thumbService);
-                    updatedCount++;
-                    Progress.UpdatedFiles = updatedCount;
-                }
-                else if (string.IsNullOrEmpty(existing.ThumbnailPath))
-                {
-                    // Generate missing thumbnail
-                    var thumbPath = await thumbService.GenerateThumbnailAsync(filePath, existing.Id, existing.Extension);
-                    if (thumbPath != null)
+                    // Check if file was modified
+                    if (existing.FileModifiedAt != fileInfo.LastWriteTimeUtc || existing.FileSize != fileInfo.Length)
                     {
-                        existing.ThumbnailPath = thumbPath;
+                        UpdateMediaFileMetadata(existing, filePath, fileInfo);
+                        updatedCount++;
+                        Progress.UpdatedFiles = updatedCount;
                     }
                 }
+                else
+                {
+                    // New file — fast create with metadata only
+                    var mediaFile = CreateMediaFileFast(filePath, relativePath, fileInfo);
+                    db.MediaFiles.Add(mediaFile);
+                    newCount++;
+                    Progress.NewFiles = newCount;
+                }
             }
-            else
+            catch (Exception ex)
             {
-                // New file
-                var mediaFile = await CreateMediaFileAsync(filePath, relativePath, fileInfo, thumbService);
-                db.MediaFiles.Add(mediaFile);
-                newCount++;
-                Progress.NewFiles = newCount;
+                skippedCount++;
+                Progress.SkippedFiles = skippedCount;
+                _logger.LogWarning(ex, "Skipped file {File}", filePath);
             }
 
-            // Save in batches of 100
-            if ((newCount + updatedCount) % 100 == 0)
+            // Save in batches of 200
+            if ((newCount + updatedCount) % 200 == 0 && (newCount + updatedCount) > 0)
             {
                 await db.SaveChangesAsync(ct);
             }
@@ -180,28 +186,81 @@ public class FileIndexerService : BackgroundService
 
         await db.SaveChangesAsync(ct);
 
-        // Generate thumbnails for new files (need IDs after save)
+        _logger.LogInformation(
+            "Phase 1 complete: {New} new, {Updated} updated, {Deleted} deleted, {Skipped} skipped",
+            newCount, updatedCount, deletedCount, skippedCount);
+
+        // ─── PHASE 2: Generate thumbnails ───
         Progress.Status = "Generating thumbnails...";
-        var newFilesWithoutThumbs = await db.MediaFiles
+        var filesNeedingThumbs = await db.MediaFiles
             .Where(m => !m.IsDeleted && m.ThumbnailPath == null)
             .ToListAsync(ct);
 
         var thumbsDone = 0;
-        foreach (var file in newFilesWithoutThumbs)
+        var thumbsTotal = filesNeedingThumbs.Count;
+        foreach (var file in filesNeedingThumbs)
         {
             if (ct.IsCancellationRequested) break;
+            thumbsDone++;
+            Progress.CurrentFile = $"Thumbnail {thumbsDone}/{thumbsTotal}: {file.FileName}";
 
-            var fullPath = Path.Combine(mediaPath, file.RelativePath.Replace('/', Path.DirectorySeparatorChar));
-            if (File.Exists(fullPath))
+            try
             {
-                var thumbPath = await thumbService.GenerateThumbnailAsync(fullPath, file.Id, file.Extension);
-                if (thumbPath != null)
+                var fullPath = Path.Combine(mediaPath, file.RelativePath.Replace('/', Path.DirectorySeparatorChar));
+                if (File.Exists(fullPath))
                 {
-                    file.ThumbnailPath = thumbPath;
+                    var thumbPath = await thumbService.GenerateThumbnailAsync(fullPath, file.Id, file.Extension);
+                    if (thumbPath != null)
+                    {
+                        file.ThumbnailPath = thumbPath;
+                    }
                 }
             }
-            thumbsDone++;
-            Progress.CurrentFile = $"Thumbnail {thumbsDone}/{newFilesWithoutThumbs.Count}";
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed thumbnail for {File}", file.FileName);
+            }
+
+            // Save every 50 thumbnails
+            if (thumbsDone % 50 == 0)
+            {
+                await db.SaveChangesAsync(ct);
+            }
+        }
+
+        await db.SaveChangesAsync(ct);
+
+        // ─── PHASE 3: Compute checksums for files missing them ───
+        Progress.Status = "Computing checksums...";
+        var filesNeedingChecksum = await db.MediaFiles
+            .Where(m => !m.IsDeleted && m.Sha256Checksum == null)
+            .ToListAsync(ct);
+
+        var checksumsDone = 0;
+        var checksumsTotal = filesNeedingChecksum.Count;
+        foreach (var file in filesNeedingChecksum)
+        {
+            if (ct.IsCancellationRequested) break;
+            checksumsDone++;
+            Progress.CurrentFile = $"Checksum {checksumsDone}/{checksumsTotal}: {file.FileName}";
+
+            try
+            {
+                var fullPath = Path.Combine(mediaPath, file.RelativePath.Replace('/', Path.DirectorySeparatorChar));
+                if (File.Exists(fullPath))
+                {
+                    file.Sha256Checksum = await ComputeChecksumAsync(fullPath, ct);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed checksum for {File}", file.FileName);
+            }
+
+            if (checksumsDone % 50 == 0)
+            {
+                await db.SaveChangesAsync(ct);
+            }
         }
 
         await db.SaveChangesAsync(ct);
@@ -212,17 +271,20 @@ public class FileIndexerService : BackgroundService
         Progress.CurrentFile = string.Empty;
 
         _logger.LogInformation(
-            "Scan complete: {New} new, {Updated} updated, {Deleted} deleted",
-            newCount, updatedCount, deletedCount);
+            "Scan complete: {New} new, {Updated} updated, {Deleted} deleted, {Thumbs} thumbnails, {Checksums} checksums",
+            newCount, updatedCount, deletedCount, thumbsDone, checksumsDone);
     }
 
-    private async Task<MediaFile> CreateMediaFileAsync(
-        string filePath, string relativePath, FileInfo fileInfo, ThumbnailService thumbService)
+    /// <summary>
+    /// Fast file creation — only reads FileInfo metadata, no file content reads.
+    /// Checksums and thumbnails are deferred to later phases.
+    /// </summary>
+    private static MediaFile CreateMediaFileFast(string filePath, string relativePath, FileInfo fileInfo)
     {
         var extension = Path.GetExtension(filePath).ToLowerInvariant();
         var mediaType = ThumbnailService.IsImage(extension) ? MediaType.Image : MediaType.Video;
 
-        var mediaFile = new MediaFile
+        return new MediaFile
         {
             FileName = Path.GetFileName(filePath),
             RelativePath = relativePath,
@@ -231,87 +293,32 @@ public class FileIndexerService : BackgroundService
             FileSize = fileInfo.Length,
             MediaType = mediaType,
             IndexedAt = DateTime.UtcNow,
-            FileModifiedAt = fileInfo.LastWriteTimeUtc
+            FileModifiedAt = fileInfo.LastWriteTimeUtc,
+            TakenDate = fileInfo.LastWriteTimeUtc // Use file modified date; EXIF read deferred
         };
-
-        // Compute checksum
-        mediaFile.Sha256Checksum = await ComputeChecksumAsync(filePath);
-
-        // Get dimensions/duration
-        if (mediaType == MediaType.Image)
-        {
-            var (w, h) = thumbService.GetImageDimensions(filePath);
-            mediaFile.Width = w;
-            mediaFile.Height = h;
-        }
-        else
-        {
-            mediaFile.DurationSeconds = thumbService.GetVideoDuration(filePath);
-        }
-
-        // Try to get taken date from EXIF
-        mediaFile.TakenDate = GetTakenDate(filePath) ?? fileInfo.LastWriteTimeUtc;
-
-        return mediaFile;
     }
 
-    private async Task UpdateMediaFileAsync(
-        MediaFile existing, string filePath, FileInfo fileInfo, ThumbnailService thumbService)
+    /// <summary>
+    /// Lightweight metadata update — no file content reads.
+    /// </summary>
+    private static void UpdateMediaFileMetadata(MediaFile existing, string filePath, FileInfo fileInfo)
     {
         existing.FileSize = fileInfo.Length;
         existing.FileModifiedAt = fileInfo.LastWriteTimeUtc;
         existing.IndexedAt = DateTime.UtcNow;
-        existing.Sha256Checksum = await ComputeChecksumAsync(filePath);
         existing.IsDeleted = false;
-
-        if (existing.MediaType == MediaType.Image)
-        {
-            var (w, h) = thumbService.GetImageDimensions(filePath);
-            existing.Width = w;
-            existing.Height = h;
-        }
-        else
-        {
-            existing.DurationSeconds = thumbService.GetVideoDuration(filePath);
-        }
-
-        existing.TakenDate = GetTakenDate(filePath) ?? fileInfo.LastWriteTimeUtc;
-
-        // Regenerate thumbnail
-        var thumbDir = Path.GetDirectoryName(existing.ThumbnailPath ?? "");
-        if (thumbDir != null && existing.ThumbnailPath != null && File.Exists(existing.ThumbnailPath))
-            File.Delete(existing.ThumbnailPath);
-
-        existing.ThumbnailPath = await thumbService.GenerateThumbnailAsync(filePath, existing.Id, existing.Extension);
+        existing.TakenDate = fileInfo.LastWriteTimeUtc;
+        // Clear checksum/thumbnail so they get regenerated
+        existing.Sha256Checksum = null;
+        existing.ThumbnailPath = null;
     }
 
-    private static async Task<string> ComputeChecksumAsync(string filePath)
+    private static async Task<string> ComputeChecksumAsync(string filePath, CancellationToken ct = default)
     {
         using var sha256 = SHA256.Create();
-        await using var stream = File.OpenRead(filePath);
-        var hash = await sha256.ComputeHashAsync(stream);
+        await using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read, 
+            bufferSize: 81920); // 80KB buffer for network performance
+        var hash = await sha256.ComputeHashAsync(stream, ct);
         return Convert.ToHexString(hash).ToLowerInvariant();
-    }
-
-    private static DateTime? GetTakenDate(string filePath)
-    {
-        try
-        {
-            var directories = MetadataExtractor.ImageMetadataReader.ReadMetadata(filePath);
-            foreach (var directory in directories)
-            {
-                foreach (var tag in directory.Tags)
-                {
-                    if (tag.Name == "Date/Time Original" || tag.Name == "Date/Time")
-                    {
-                        if (DateTime.TryParse(tag.Description, out var date))
-                            return date;
-                    }
-                }
-            }
-        }
-        catch { }
-
-        return null;
     }
 }

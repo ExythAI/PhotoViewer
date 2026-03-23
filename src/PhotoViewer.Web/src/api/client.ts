@@ -103,6 +103,7 @@ export const api = {
     newFiles: number;
     updatedFiles: number;
     deletedFiles: number;
+    skippedFiles: number;
     percentComplete: number;
     currentFile: string;
     lastScanStarted: string | null;

@@ -77,12 +77,32 @@ public class ThumbnailService
         // Extract frame at 1 second using ffmpeg
         var tempFrame = Path.Combine(_thumbnailDir, $"temp_{Guid.NewGuid()}.png");
 
-        var process = new Process
+        if (!await RunFfmpegWithTimeout(
+            $"-i \"{sourcePath}\" -ss 00:00:01 -vframes 1 -y \"{tempFrame}\"", 30))
+        {
+            // Try frame at 0 seconds if 1 second fails (short video)
+            await RunFfmpegWithTimeout(
+                $"-i \"{sourcePath}\" -ss 00:00:00 -vframes 1 -y \"{tempFrame}\"", 30);
+        }
+
+        if (File.Exists(tempFrame))
+        {
+            var result = await GenerateImageThumbnailAsync(tempFrame, outputPath);
+            try { File.Delete(tempFrame); } catch { }
+            return result;
+        }
+
+        return null;
+    }
+
+    private static async Task<bool> RunFfmpegWithTimeout(string arguments, int timeoutSeconds)
+    {
+        using var process = new Process
         {
             StartInfo = new ProcessStartInfo
             {
                 FileName = "ffmpeg",
-                Arguments = $"-i \"{sourcePath}\" -ss 00:00:01 -vframes 1 -y \"{tempFrame}\"",
+                Arguments = arguments,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 UseShellExecute = false,
@@ -91,35 +111,17 @@ public class ThumbnailService
         };
 
         process.Start();
-        await process.WaitForExitAsync();
+        // Drain stderr to prevent deadlock
+        _ = process.StandardError.ReadToEndAsync();
+        _ = process.StandardOutput.ReadToEndAsync();
 
-        if (!File.Exists(tempFrame))
+        if (!process.WaitForExit(timeoutSeconds * 1000))
         {
-            // Try frame at 0 seconds if 1 second fails (short video)
-            process = new Process
-            {
-                StartInfo = new ProcessStartInfo
-                {
-                    FileName = "ffmpeg",
-                    Arguments = $"-i \"{sourcePath}\" -ss 00:00:00 -vframes 1 -y \"{tempFrame}\"",
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    UseShellExecute = false,
-                    CreateNoWindow = true
-                }
-            };
-            process.Start();
-            await process.WaitForExitAsync();
+            try { process.Kill(true); } catch { }
+            return false;
         }
 
-        if (File.Exists(tempFrame))
-        {
-            var result = await GenerateImageThumbnailAsync(tempFrame, outputPath);
-            File.Delete(tempFrame);
-            return result;
-        }
-
-        return null;
+        return process.ExitCode == 0;
     }
 
     public (int? width, int? height) GetImageDimensions(string filePath)
@@ -154,7 +156,11 @@ public class ThumbnailService
 
             process.Start();
             var output = process.StandardOutput.ReadToEnd();
-            process.WaitForExit();
+            if (!process.WaitForExit(30000))
+            {
+                try { process.Kill(); } catch { }
+                return null;
+            }
 
             if (double.TryParse(output.Trim(), out var duration))
                 return duration;

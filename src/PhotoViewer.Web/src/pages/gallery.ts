@@ -167,6 +167,7 @@ function pollScanStatus(): void {
             <span>📄 Files: ${s.processedFiles.toLocaleString()}/${s.totalFiles.toLocaleString()}</span>
             <span>🆕 New: ${s.newFiles}</span>
             <span>✏️ Updated: ${s.updatedFiles}</span>
+            ${s.skippedFiles ? `<span>⚠️ Skipped: ${s.skippedFiles}</span>` : ''}
             ${s.currentFile ? `<span>📎 ${s.currentFile}</span>` : ''}
           </div>
         `;
