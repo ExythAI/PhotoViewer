@@ -34,8 +34,21 @@ check_command() {
 echo -e "${BOLD}Checking prerequisites...${NC}"
 MISSING=0
 check_command docker || MISSING=1
-check_command docker-compose || { check_command "docker compose" || MISSING=1; }
 check_command git || MISSING=1
+
+# Detect docker compose (plugin) vs docker-compose (standalone)
+COMPOSE_CMD=""
+if command -v docker-compose &> /dev/null; then
+    COMPOSE_CMD="docker-compose"
+    echo -e "${GREEN}✓${NC} docker-compose found"
+elif docker compose version &> /dev/null; then
+    COMPOSE_CMD="docker compose"
+    echo -e "${GREEN}✓${NC} docker compose (plugin) found"
+else
+    echo -e "${RED}✗ Neither docker-compose nor docker compose plugin found.${NC}"
+    echo -e "${YELLOW}  Install with: sudo apt install docker-compose-plugin${NC}"
+    MISSING=1
+fi
 
 if [ "$MISSING" -eq 1 ]; then
     echo ""
@@ -124,11 +137,7 @@ echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━�
 echo -e "${YELLOW}(this may take a few minutes on first run)${NC}"
 echo ""
 
-if command -v docker-compose &> /dev/null; then
-    docker-compose up -d --build
-else
-    docker compose up -d --build
-fi
+$COMPOSE_CMD up -d --build
 
 echo ""
 echo -e "${GREEN}${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
@@ -144,7 +153,7 @@ echo ""
 echo -e "   ${YELLOW}⚠  Change the default admin password after first login!${NC}"
 echo ""
 echo -e "   Useful commands:"
-echo -e "     View logs:    ${CYAN}cd ${INSTALL_DIR} && docker-compose logs -f${NC}"
-echo -e "     Stop:         ${CYAN}cd ${INSTALL_DIR} && docker-compose down${NC}"
-echo -e "     Update:       ${CYAN}cd ${INSTALL_DIR} && git pull && docker-compose up -d --build${NC}"
+echo -e "     View logs:    ${CYAN}cd ${INSTALL_DIR} && ${COMPOSE_CMD} logs -f${NC}"
+echo -e "     Stop:         ${CYAN}cd ${INSTALL_DIR} && ${COMPOSE_CMD} down${NC}"
+echo -e "     Update:       ${CYAN}cd ${INSTALL_DIR} && git pull && ${COMPOSE_CMD} up -d --build${NC}"
 echo ""
