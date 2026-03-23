@@ -251,6 +251,45 @@ public class MediaController : ControllerBase
         return Ok(new { message = "Scan started" });
     }
 
+    [HttpPost("clear")]
+    [Authorize(Roles = "Admin")]
+    public async Task<IActionResult> ClearDatabase()
+    {
+        if (FileIndexerService.Progress.IsScanning)
+            return BadRequest(new { message = "Cannot clear while a scan is running" });
+
+        // Delete all media file records
+        var mediaCount = await _db.MediaFiles.CountAsync();
+        _db.MediaFiles.RemoveRange(_db.MediaFiles);
+
+        // Delete all download requests
+        _db.DownloadRequests.RemoveRange(_db.DownloadRequests);
+
+        await _db.SaveChangesAsync();
+
+        // Clear thumbnail files from disk
+        var thumbDir = _config["Storage:ThumbnailPath"] ?? "/data/thumbnails";
+        if (Directory.Exists(thumbDir))
+        {
+            foreach (var file in Directory.GetFiles(thumbDir))
+            {
+                try { System.IO.File.Delete(file); } catch { }
+            }
+        }
+
+        // Clear download zip files from disk
+        var downloadDir = _config["Storage:DownloadPath"] ?? "/data/downloads";
+        if (Directory.Exists(downloadDir))
+        {
+            foreach (var file in Directory.GetFiles(downloadDir))
+            {
+                try { System.IO.File.Delete(file); } catch { }
+            }
+        }
+
+        return Ok(new { message = $"Cleared {mediaCount} media files, thumbnails, and downloads" });
+    }
+
     [HttpGet("stats")]
     public async Task<IActionResult> GetStats()
     {

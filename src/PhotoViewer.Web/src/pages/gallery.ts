@@ -125,6 +125,7 @@ function renderHeader(user: { username: string; role: string } | null): string {
         ${user?.role === 'Admin' ? '<button class="nav-link" onclick="location.hash=\'#/users\'">Users</button>' : ''}
       </nav>
       <div class="header-actions">
+        ${user?.role === 'Admin' ? '<button class="btn btn-sm" id="clear-db-btn" style="border-color:var(--danger)">🗑️ Clear DB</button>' : ''}
         ${user?.role === 'Admin' ? '<button class="btn btn-sm" id="scan-btn">🔄 Scan Now</button>' : ''}
         <div class="user-badge">👤 ${user?.username || 'User'}</div>
         <button class="btn btn-sm" onclick="location.hash='#/settings'">⚙️</button>
@@ -259,6 +260,20 @@ function setupEventListeners(): void {
     (document.getElementById('date-to') as HTMLInputElement).value = '';
     currentPage = 1;
     loadMedia();
+  });
+
+  document.getElementById('clear-db-btn')?.addEventListener('click', async () => {
+    if (!confirm('⚠️ This will DELETE all indexed media, thumbnails, and downloads.\n\nAre you sure?')) return;
+    if (!confirm('This cannot be undone. Type OK to confirm by clicking OK.')) return;
+
+    try {
+      const result = await api.clearDatabase();
+      showToast(result.message);
+      loadStats();
+      loadMedia();
+    } catch (err: any) {
+      showToast(err.message || 'Failed to clear database', 'error');
+    }
   });
 
   document.getElementById('download-selected')?.addEventListener('click', downloadSelected);
