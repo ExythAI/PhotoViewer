@@ -38,8 +38,9 @@ public class DownloadController : ControllerBase
     [HttpGet("{id}")]
     public async Task<IActionResult> GetStatus(int id)
     {
+        var userId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
         var request = await _downloadService.GetRequestAsync(id);
-        if (request == null) return NotFound();
+        if (request == null || request.UserId != userId) return NotFound();
 
         return Ok(new
         {
@@ -55,8 +56,9 @@ public class DownloadController : ControllerBase
     [HttpGet("{id}/file")]
     public async Task<IActionResult> DownloadFile(int id)
     {
+        var userId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
         var request = await _downloadService.GetRequestAsync(id);
-        if (request == null) return NotFound();
+        if (request == null || request.UserId != userId) return NotFound();
 
         if (request.Status != Models.DownloadStatus.Ready || request.ZipFilePath == null)
             return BadRequest(new { message = "Download not ready" });

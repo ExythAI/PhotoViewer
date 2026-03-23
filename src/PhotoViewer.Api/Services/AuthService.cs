@@ -75,7 +75,8 @@ public class AuthService
     private string GenerateJwt(User user)
     {
         var key = new SymmetricSecurityKey(
-            Encoding.UTF8.GetBytes(_config["Jwt:Key"] ?? "PhotoViewerDefaultSecretKey2026!@#$%^&*()"));
+            Encoding.UTF8.GetBytes(_config["Jwt:Key"]
+                ?? throw new InvalidOperationException("Jwt:Key is not configured")));
         var credentials = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
 
         var claims = new[]

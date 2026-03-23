@@ -15,8 +15,13 @@ if (dbDir != null) Directory.CreateDirectory(dbDir);
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseSqlite($"Data Source={dbPath}"));
 
-// Configure JWT Authentication
-var jwtKey = builder.Configuration["Jwt:Key"] ?? "PhotoViewerDefaultSecretKey2026!@#$%^&*()";
+// Configure JWT Authentication — key MUST be set via environment
+var jwtKey = builder.Configuration["Jwt:Key"];
+if (string.IsNullOrEmpty(jwtKey) || jwtKey.Length < 32)
+{
+    Console.Error.WriteLine("FATAL: Jwt:Key must be set (min 32 chars). Set the JWT_KEY environment variable.");
+    Environment.Exit(1);
+}
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {
@@ -42,14 +47,8 @@ builder.Services.AddSingleton<DownloadService>();
 builder.Services.AddSingleton<FileIndexerService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<FileIndexerService>());
 
-// CORS for development
-builder.Services.AddCors(options =>
-{
-    options.AddDefaultPolicy(policy =>
-    {
-        policy.AllowAnyOrigin().AllowAnyMethod().AllowAnyHeader();
-    });
-});
+// Rate limiting for login endpoint
+builder.Services.AddSingleton<PhotoViewer.Api.Services.LoginRateLimiter>();
 
 var app = builder.Build();
 
@@ -60,7 +59,6 @@ using (var scope = app.Services.CreateScope())
     db.Database.Migrate();
 }
 
-app.UseCors();
 app.UseAuthentication();
 app.UseAuthorization();
 

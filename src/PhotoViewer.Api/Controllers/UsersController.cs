@@ -33,6 +33,9 @@ public class UsersController : ControllerBase
         if (string.IsNullOrWhiteSpace(request.Username) || string.IsNullOrWhiteSpace(request.Password))
             return BadRequest(new { message = "Username and password are required" });
 
+        if (request.Password.Length < 8)
+            return BadRequest(new { message = "Password must be at least 8 characters" });
+
         if (!Enum.TryParse<UserRole>(request.Role, true, out var role))
             role = UserRole.User;
 
