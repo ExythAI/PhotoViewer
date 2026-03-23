@@ -120,6 +120,7 @@ public class MediaController : ControllerBase
     }
 
     [HttpGet("{id}/thumbnail")]
+    [AllowAnonymous]
     public async Task<IActionResult> GetThumbnail(int id)
     {
         var file = await _db.MediaFiles.FirstOrDefaultAsync(m => m.Id == id && !m.IsDeleted);
@@ -149,6 +150,7 @@ public class MediaController : ControllerBase
     }
 
     [HttpGet("{id}/stream")]
+    [AllowAnonymous]
     public async Task<IActionResult> StreamFile(int id)
     {
         var file = await _db.MediaFiles.FirstOrDefaultAsync(m => m.Id == id && !m.IsDeleted);
