@@ -111,6 +111,7 @@ echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━�
 if [ -d "$INSTALL_DIR/.git" ]; then
     echo -e "${YELLOW}→${NC} Existing installation found, pulling latest..."
     cd "$INSTALL_DIR"
+    git checkout -- . 2>/dev/null
     git pull --ff-only
 else
     echo -e "${YELLOW}→${NC} Cloning repository..."
