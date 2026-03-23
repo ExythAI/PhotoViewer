@@ -41,13 +41,24 @@ COMPOSE_CMD=""
 if command -v docker-compose &> /dev/null; then
     COMPOSE_CMD="docker-compose"
     echo -e "${GREEN}✓${NC} docker-compose found"
-elif docker compose version &> /dev/null; then
+elif docker compose version &> /dev/null 2>&1; then
     COMPOSE_CMD="docker compose"
     echo -e "${GREEN}✓${NC} docker compose (plugin) found"
 else
-    echo -e "${RED}✗ Neither docker-compose nor docker compose plugin found.${NC}"
-    echo -e "${YELLOW}  Install with: sudo apt install docker-compose-plugin${NC}"
-    MISSING=1
+    echo -e "${YELLOW}⚠ docker compose not found — installing plugin...${NC}"
+    sudo apt-get update -qq && sudo apt-get install -y -qq docker-compose-plugin 2>/dev/null \
+      || sudo mkdir -p /usr/local/lib/docker/cli-plugins \
+      && sudo curl -SL "https://github.com/docker/compose/releases/latest/download/docker-compose-linux-$(uname -m)" \
+         -o /usr/local/lib/docker/cli-plugins/docker-compose \
+      && sudo chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
+
+    if docker compose version &> /dev/null 2>&1; then
+        COMPOSE_CMD="docker compose"
+        echo -e "${GREEN}✓${NC} docker compose plugin installed"
+    else
+        echo -e "${RED}✗ Failed to install docker compose plugin.${NC}"
+        MISSING=1
+    fi
 fi
 
 if [ "$MISSING" -eq 1 ]; then
