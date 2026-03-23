@@ -172,7 +172,20 @@ function pollScanStatus(): void {
             ${s.currentFile ? `<span>📎 ${s.currentFile}</span>` : ''}
           </div>
         `;
+        // Toggle scan button to Stop
+        const scanBtn = document.getElementById('scan-btn');
+        if (scanBtn) {
+          scanBtn.textContent = '⏹ Stop Scan';
+          scanBtn.style.borderColor = 'var(--danger)';
+        }
       } else {
+        // Reset scan button to Scan Now
+        const scanBtn = document.getElementById('scan-btn');
+        if (scanBtn) {
+          scanBtn.textContent = '🔄 Scan Now';
+          scanBtn.style.borderColor = '';
+        }
+
         if (wasScanning) {
           // Scan just finished — refresh gallery data
           wasScanning = false;
@@ -289,13 +302,25 @@ function setupEventListeners(): void {
   });
 
   document.getElementById('scan-btn')?.addEventListener('click', async () => {
-    try {
-      await api.triggerScan();
-      showToast('Scan started!');
-      wasScanning = false; // Reset so we detect the new scan
-      pollScanStatus();
-    } catch {
-      showToast('Failed to start scan', 'error');
+    const btn = document.getElementById('scan-btn')!;
+    const isScanning = btn.textContent?.includes('Stop');
+
+    if (isScanning) {
+      try {
+        await api.stopScan();
+        showToast('Stop requested — scan will finish current file and stop');
+      } catch {
+        showToast('Failed to stop scan', 'error');
+      }
+    } else {
+      try {
+        await api.triggerScan();
+        showToast('Scan started!');
+        wasScanning = false;
+        pollScanStatus();
+      } catch {
+        showToast('Failed to start scan', 'error');
+      }
     }
   });
 }

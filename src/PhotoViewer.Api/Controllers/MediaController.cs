@@ -251,6 +251,17 @@ public class MediaController : ControllerBase
         return Ok(new { message = "Scan started" });
     }
 
+    [HttpPost("scan/stop")]
+    [Authorize(Roles = "Admin")]
+    public IActionResult StopScan()
+    {
+        if (!FileIndexerService.Progress.IsScanning)
+            return BadRequest(new { message = "No scan is running" });
+
+        FileIndexerService.StopScan();
+        return Ok(new { message = "Scan stop requested" });
+    }
+
     [HttpPost("clear")]
     [Authorize(Roles = "Admin")]
     public async Task<IActionResult> ClearDatabase()

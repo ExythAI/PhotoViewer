@@ -30,6 +30,7 @@ public class FileIndexerService : BackgroundService
     private readonly ILogger<FileIndexerService> _logger;
 
     public static ScanProgress Progress { get; } = new();
+    private static CancellationTokenSource? _scanCts;
 
     public FileIndexerService(
         IServiceScopeFactory scopeFactory,
@@ -39,6 +40,11 @@ public class FileIndexerService : BackgroundService
         _scopeFactory = scopeFactory;
         _config = config;
         _logger = logger;
+    }
+
+    public static void StopScan()
+    {
+        _scanCts?.Cancel();
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -51,6 +57,12 @@ public class FileIndexerService : BackgroundService
             try
             {
                 await RunScanAsync(stoppingToken);
+            }
+            catch (OperationCanceledException)
+            {
+                _logger.LogInformation("Scan was cancelled");
+                Progress.IsScanning = false;
+                Progress.Status = "Scan cancelled";
             }
             catch (Exception ex)
             {
@@ -67,6 +79,10 @@ public class FileIndexerService : BackgroundService
 
     public async Task RunScanAsync(CancellationToken ct = default)
     {
+        // Create a linked CTS so both the host shutdown and manual stop work
+        _scanCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        var token = _scanCts.Token;
+
         var mediaPath = _config["Storage:MediaPath"] ?? "/media";
         _logger.LogInformation("Starting file scan of {Path}", mediaPath);
 
@@ -108,7 +124,7 @@ public class FileIndexerService : BackgroundService
 
         var existingFiles = await db.MediaFiles
             .Where(m => !m.IsDeleted)
-            .ToDictionaryAsync(m => m.RelativePath, ct);
+            .ToDictionaryAsync(m => m.RelativePath, token);
 
         var processedPaths = new HashSet<string>();
         var processedFolders = new HashSet<string>();
@@ -119,7 +135,7 @@ public class FileIndexerService : BackgroundService
         // ─── PHASE 1: Fast index (metadata only, no checksums, no thumbnails) ───
         foreach (var filePath in allFiles)
         {
-            if (ct.IsCancellationRequested) break;
+            if (token.IsCancellationRequested) break;
 
             var relativePath = Path.GetRelativePath(mediaPath, filePath).Replace('\\', '/');
             processedPaths.Add(relativePath);
@@ -167,7 +183,7 @@ public class FileIndexerService : BackgroundService
             // Save in batches of 200
             if ((newCount + updatedCount) % 200 == 0 && (newCount + updatedCount) > 0)
             {
-                await db.SaveChangesAsync(ct);
+                await db.SaveChangesAsync(token);
             }
         }
 
@@ -184,7 +200,7 @@ public class FileIndexerService : BackgroundService
         }
         Progress.DeletedFiles = deletedCount;
 
-        await db.SaveChangesAsync(ct);
+        await db.SaveChangesAsync(token);
 
         _logger.LogInformation(
             "Phase 1 complete: {New} new, {Updated} updated, {Deleted} deleted, {Skipped} skipped",
@@ -194,7 +210,7 @@ public class FileIndexerService : BackgroundService
         Progress.Status = "Generating thumbnails...";
         var filesNeedingThumbs = await db.MediaFiles
             .Where(m => !m.IsDeleted && m.ThumbnailPath == null)
-            .ToListAsync(ct);
+            .ToListAsync(token);
 
         var thumbsDone = 0;
         var thumbsTotal = filesNeedingThumbs.Count;
@@ -205,8 +221,8 @@ public class FileIndexerService : BackgroundService
         var thumbResults = new System.Collections.Concurrent.ConcurrentDictionary<int, string>();
 
         await Parallel.ForEachAsync(filesNeedingThumbs,
-            new ParallelOptions { MaxDegreeOfParallelism = 6, CancellationToken = ct },
-            async (file, token) =>
+            new ParallelOptions { MaxDegreeOfParallelism = 6, CancellationToken = token },
+            async (file, pToken) =>
             {
                 var done = Interlocked.Increment(ref thumbsDone);
                 Progress.ProcessedFiles = done;
@@ -236,7 +252,7 @@ public class FileIndexerService : BackgroundService
             var file = filesNeedingThumbs.FirstOrDefault(f => f.Id == fileId);
             if (file != null) file.ThumbnailPath = thumbPath;
         }
-        await db.SaveChangesAsync(ct);
+        await db.SaveChangesAsync(token);
 
         _logger.LogInformation("Phase 2 complete: {Thumbs}/{Total} thumbnails generated", thumbResults.Count, thumbsTotal);
 
@@ -244,7 +260,7 @@ public class FileIndexerService : BackgroundService
         Progress.Status = "Computing checksums...";
         var filesNeedingChecksum = await db.MediaFiles
             .Where(m => !m.IsDeleted && m.Sha256Checksum == null)
-            .ToListAsync(ct);
+            .ToListAsync(token);
 
         var checksumsDone = 0;
         var checksumsTotal = filesNeedingChecksum.Count;
@@ -254,8 +270,8 @@ public class FileIndexerService : BackgroundService
         var checksumResults = new System.Collections.Concurrent.ConcurrentDictionary<int, string>();
 
         await Parallel.ForEachAsync(filesNeedingChecksum,
-            new ParallelOptions { MaxDegreeOfParallelism = 3, CancellationToken = ct },
-            async (file, token) =>
+            new ParallelOptions { MaxDegreeOfParallelism = 3, CancellationToken = token },
+            async (file, pToken) =>
             {
                 var done = Interlocked.Increment(ref checksumsDone);
                 Progress.ProcessedFiles = done;
@@ -266,7 +282,7 @@ public class FileIndexerService : BackgroundService
                     var fullPath = Path.Combine(mediaPath, file.RelativePath.Replace('/', Path.DirectorySeparatorChar));
                     if (File.Exists(fullPath))
                     {
-                        var checksum = await ComputeChecksumAsync(fullPath, token);
+                        var checksum = await ComputeChecksumAsync(fullPath, pToken);
                         checksumResults[file.Id] = checksum;
                     }
                 }
@@ -282,7 +298,7 @@ public class FileIndexerService : BackgroundService
             var file = filesNeedingChecksum.FirstOrDefault(f => f.Id == fileId);
             if (file != null) file.Sha256Checksum = checksum;
         }
-        await db.SaveChangesAsync(ct);
+        await db.SaveChangesAsync(token);
 
         Progress.IsScanning = false;
         Progress.LastScanCompleted = DateTime.UtcNow;

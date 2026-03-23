@@ -94,6 +94,8 @@ export const api = {
 
   triggerScan: () => request('/media/scan', { method: 'POST' }),
 
+  stopScan: () => request('/media/scan/stop', { method: 'POST' }),
+
   clearDatabase: () => request<{ message: string }>('/media/clear', { method: 'POST' }),
 
   getScanStatus: () => request<{
