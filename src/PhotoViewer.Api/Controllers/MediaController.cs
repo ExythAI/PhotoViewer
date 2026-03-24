@@ -96,13 +96,21 @@ public class MediaController : ControllerBase
         // Hide duplicates: keep only the first file (lowest ID) per checksum
         if (hideDuplicates)
         {
-            var duplicateIdsToHide = _db.MediaFiles
-                .Where(m => !m.IsDeleted && m.Sha256Checksum != null)
-                .GroupBy(m => m.Sha256Checksum)
-                .Where(g => g.Count() > 1)
-                .SelectMany(g => g.OrderBy(m => m.Id).Skip(1).Select(m => m.Id));
+            // Use raw SQL subquery since SQLite can't translate the LINQ GroupBy version
+            var idsToHide = _db.MediaFiles
+                .FromSqlRaw(@"
+                    SELECT m.* FROM MediaFiles m
+                    INNER JOIN (
+                        SELECT Sha256Checksum, MIN(Id) AS KeepId
+                        FROM MediaFiles
+                        WHERE IsDeleted = 0 AND Sha256Checksum IS NOT NULL
+                        GROUP BY Sha256Checksum
+                        HAVING COUNT(*) > 1
+                    ) dups ON m.Sha256Checksum = dups.Sha256Checksum AND m.Id != dups.KeepId
+                    WHERE m.IsDeleted = 0")
+                .Select(m => m.Id);
 
-            query = query.Where(m => !duplicateIdsToHide.Contains(m.Id));
+            query = query.Where(m => !idsToHide.Contains(m.Id));
         }
 
         var totalCount = await query.CountAsync();
