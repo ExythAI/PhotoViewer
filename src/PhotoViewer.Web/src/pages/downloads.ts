@@ -140,9 +140,9 @@ function getDownloadItemHtml(item: DownloadItem): string {
       <div style="display:flex;align-items:center;gap:12px">
         <span class="status-badge ${statusClass}">${item.status}</span>
         ${item.status === 'Ready' ? `
-          <a href="${api.getDownloadFileUrl(item.id)}" class="btn btn-primary btn-sm" download>
+          <button class="btn btn-primary btn-sm" data-download="${item.id}" data-filename="${item.zipFileName || 'download.zip'}">
             ⬇ Download
-          </a>
+          </button>
         ` : ''}
         <button class="btn btn-sm btn-danger" data-remove="${item.id}" title="Remove">✕</button>
       </div>
@@ -155,6 +155,38 @@ function attachDownloadEvents(id: number, item: DownloadItem): void {
     const ids: number[] = JSON.parse(localStorage.getItem('pv_downloads') || '[]');
     localStorage.setItem('pv_downloads', JSON.stringify(ids.filter(i => i !== id)));
     document.getElementById(`download-${id}`)?.remove();
+  });
+
+  document.querySelector(`[data-download="${id}"]`)?.addEventListener('click', async (e) => {
+    const btn = e.currentTarget as HTMLButtonElement;
+    const filename = btn.dataset.filename || 'download.zip';
+    btn.textContent = '⏳ Downloading...';
+    btn.disabled = true;
+
+    try {
+      const token = localStorage.getItem('pv_token');
+      const res = await fetch(api.getDownloadFileUrl(id), {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+
+      if (!res.ok) throw new Error('Download failed');
+
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+      btn.textContent = '✅ Done';
+    } catch {
+      btn.textContent = '⬇ Download';
+      btn.disabled = false;
+      showToast('Download failed', 'error');
+    }
   });
 }
 
