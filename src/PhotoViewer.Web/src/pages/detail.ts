@@ -94,10 +94,9 @@ function renderOverlay(): void {
         </div>` : ''}
       </div>
       <div class="detail-actions">
-        <a href="${streamUrl}" download="${item.fileName}" class="btn btn-primary" style="text-align:center;justify-content:center;text-decoration:none">
+        <button class="btn btn-primary" id="detail-download" style="text-align:center;justify-content:center">
           ⬇ Download Original
-        </a>
-        <button class="btn" id="detail-add-queue">Add to Download Queue</button>
+        </button>
       </div>
     </div>
   `;
@@ -114,12 +113,30 @@ function renderOverlay(): void {
     currentIndex = Math.min(currentList.length - 1, currentIndex + 1);
     renderOverlay();
   });
-  overlay.querySelector('#detail-add-queue')?.addEventListener('click', async () => {
+  overlay.querySelector('#detail-download')?.addEventListener('click', async () => {
+    const btn = document.getElementById('detail-download') as HTMLButtonElement;
+    btn.textContent = '⏳ Downloading...';
+    btn.disabled = true;
     try {
-      const result = await api.createDownload([item.id]);
-      showToast(`Added to download queue! ID: ${result.id}`);
-    } catch (err: any) {
-      showToast(err.message || 'Failed to add to queue', 'error');
+      const token = localStorage.getItem('pv_token');
+      const res = await fetch(streamUrl, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (!res.ok) throw new Error('Download failed');
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = item.fileName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      btn.textContent = '✅ Downloaded';
+    } catch {
+      btn.textContent = '⬇ Download Original';
+      btn.disabled = false;
+      showToast('Download failed', 'error');
     }
   });
 
